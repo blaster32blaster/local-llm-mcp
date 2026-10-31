@@ -12,6 +12,11 @@ const TIMEOUT_MS = Number(process.env.LOCAL_LLM_TIMEOUT_MS || 600000);
 const MAX_FILE_BYTES = Number(process.env.LOCAL_LLM_MAX_FILE_BYTES || 400000);
 const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
+const CPU_ONLY_DESC =
+  "Run this model on the CPU and system RAM only, leaving the GPU to another model, so a small model (4B-8B) can " +
+  "work in parallel with a big one at no cost to its speed. Slower than the GPU (~19 tok/s for a 4B). Use the same " +
+  "setting every time for a given model: switching reloads it.";
+
 const log = (...a) => process.stderr.write("[local-llm] " + a.join(" ") + "\n");
 
 const TOOLS = [
@@ -33,6 +38,7 @@ const TOOLS = [
         model: { type: "string", description: `Ollama model name (default ${DEFAULT_MODEL}). Use list_local_models to see options.` },
         system: { type: "string", description: "Optional system prompt (role, output format)." },
         think: { type: "boolean", description: "Let reasoning models think before answering (slower). Default false." },
+        cpu_only: { type: "boolean", description: CPU_ONLY_DESC },
         temperature: { type: "number", description: "Sampling temperature (default model setting)." },
         max_tokens: { type: "integer", description: "Maximum tokens to generate." },
         num_ctx: { type: "integer", description: "Context window in tokens (default 8192)." },
@@ -54,6 +60,7 @@ const TOOLS = [
         model: { type: "string", description: `Ollama model name (default ${DEFAULT_MODEL}).` },
         system: { type: "string", description: "Optional system prompt." },
         think: { type: "boolean", description: "Let reasoning models think first (slower). Default false." },
+        cpu_only: { type: "boolean", description: CPU_ONLY_DESC },
         max_tokens: { type: "integer", description: "Maximum tokens to generate." },
         num_ctx: { type: "integer", description: "Context window in tokens (default: sized to the files, at least 8192)." },
       },
@@ -82,12 +89,13 @@ async function chat(args, prompt, defaultCtx) {
   const options = { num_ctx: args.num_ctx || defaultCtx };
   if (args.temperature !== undefined) options.temperature = args.temperature;
   if (args.max_tokens) options.num_predict = args.max_tokens;
+  if (args.cpu_only) options.num_gpu = 0; // zero layers offloaded to the GPU
   const model = args.model || DEFAULT_MODEL;
   const started = Date.now();
   const r = await ollama("/api/chat", { model, messages, stream: false, think: !!args.think, options });
   const secs = ((Date.now() - started) / 1000).toFixed(1);
   const tps = r.eval_count && r.eval_duration ? (r.eval_count / (r.eval_duration / 1e9)).toFixed(1) : "?";
-  const footer = `\n\n[local model ${model}: ${r.prompt_eval_count ?? "?"} prompt tokens, ${r.eval_count ?? "?"} output tokens, ${tps} tok/s, ${secs}s]`;
+  const footer = `\n\n[local model ${model}${args.cpu_only ? " (CPU)" : ""}:${r.prompt_eval_count ?? "?"} prompt tokens, ${r.eval_count ?? "?"} output tokens, ${tps} tok/s, ${secs}s]`;
   return stripThinking(r.message?.content || "") + footer;
 }
 
@@ -106,6 +114,12 @@ function contextFor(prompt, maxTokens) {
   return Math.max(8192, Math.ceil(needed / 8192) * 8192);
 }
 
+// Where a loaded model lives, from /api/ps: "GPU", "CPU" or e.g. "47% GPU / 53% CPU".
+function placement(m) {
+  const gpu = m.size ? Math.round((100 * (m.size_vram || 0)) / m.size) : 0;
+  return gpu >= 100 ? "GPU" : gpu <= 0 ? "CPU" : `${gpu}% GPU / ${100 - gpu}% CPU`;
+}
+
 async function readFiles(paths) {
   let total = 0;
   const parts = [];
@@ -122,9 +136,9 @@ async function callTool(name, args = {}) {
   switch (name) {
     case "list_local_models": {
       const [tags, ps] = await Promise.all([ollama("/api/tags"), ollama("/api/ps")]);
-      const loaded = new Set((ps.models || []).map((m) => m.name));
+      const loaded = new Map((ps.models || []).map((m) => [m.name, placement(m)]));
       const lines = (tags.models || []).map(
-        (m) => `${m.name}  ${(m.size / 1e9).toFixed(1)} GB  ${m.details?.parameter_size || ""} ${m.details?.quantization_level || ""}${loaded.has(m.name) ? "  [loaded]" : ""}`
+        (m) => `${m.name}  ${(m.size / 1e9).toFixed(1)} GB  ${m.details?.parameter_size || ""} ${m.details?.quantization_level || ""}${loaded.has(m.name) ? `  [loaded: ${loaded.get(m.name)}]` : ""}`
       );
       return `Default model: ${DEFAULT_MODEL}\n` + (lines.join("\n") || "No models installed.");
     }

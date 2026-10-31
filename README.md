@@ -12,7 +12,7 @@ Claude Code ──MCP (stdio)──> server.mjs ──HTTP──> Ollama (127.0.
 
 | Tool | What it does |
 |---|---|
-| `list_local_models` | Installed models with size, parameter count, quantization, and which are loaded in memory |
+| `list_local_models` | Installed models with size, parameter count, quantization, and which are loaded (on the GPU, the CPU, or split) |
 | `ask_local` | Sends a self-contained prompt (optional system prompt) to a local model and returns the answer |
 | `ask_local_files` | Same, but the **server reads the files itself** and appends them to the prompt, so their contents never pass through Claude's context. Good for large or private files |
 
@@ -22,6 +22,17 @@ Notes:
 - The local model has **no context of the Claude conversation**: each call must contain everything it needs.
 - Reasoning ("thinking") is off by default. Pass `think: true` for harder tasks. Inline reasoning (`...</think>`) is stripped, so only the answer comes back.
 - Local models are much weaker than Claude. Treat their output as a draft and check it.
+
+## A GPU model and a CPU model at the same time
+
+Pass `cpu_only: true` to `ask_local` or `ask_local_files` to run that model entirely on the CPU and system RAM. A small model can then work in parallel with a big model on the GPU without slowing it down, because they use separate memory. Measured on an RTX 4070 Ti + i7-13700KF with 32 GB DDR5:
+
+| | `qwen3:14b` (GPU) | `qwen3:4b` (`cpu_only`) |
+|---|---|---|
+| Each alone | 44.0 tok/s | 18.6 tok/s |
+| Both at once | 43.7 tok/s | 19.4 tok/s |
+
+Good CPU-side jobs: tagging or sorting lines, pulling fields out of text, quick checks, short summaries. Keep CPU models at 4B-8B, and don't pair a CPU model with one that is already split between GPU and RAM (like `qwen3-coder:30b`): they compete for RAM bandwidth. Use the same `cpu_only` setting every time for a given model, since switching reloads it. The gain needs Claude to issue both calls at once; the server handles requests concurrently.
 
 ## Requirements
 
