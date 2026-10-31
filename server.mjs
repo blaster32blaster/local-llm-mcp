@@ -55,7 +55,7 @@ const TOOLS = [
         system: { type: "string", description: "Optional system prompt." },
         think: { type: "boolean", description: "Let reasoning models think first (slower). Default false." },
         max_tokens: { type: "integer", description: "Maximum tokens to generate." },
-        num_ctx: { type: "integer", description: "Context window in tokens (default 32768)." },
+        num_ctx: { type: "integer", description: "Context window in tokens (default: sized to the files, at least 8192)." },
       },
       required: ["prompt", "paths"],
       additionalProperties: false,
@@ -98,6 +98,14 @@ function stripThinking(text) {
   return (end >= 0 ? text.slice(end + "</think>".length) : text).trim();
 }
 
+// A bigger context window costs VRAM: on a 12 GB card a 32k window pushes a 14B model
+// partly onto the CPU and cuts its speed by ~4x. Size it to the input instead
+// (~3.5 characters per token, plus room for the answer), in 8k steps.
+function contextFor(prompt, maxTokens) {
+  const needed = Math.ceil(prompt.length / 3.5) + (maxTokens || 4096);
+  return Math.max(8192, Math.ceil(needed / 8192) * 8192);
+}
+
 async function readFiles(paths) {
   let total = 0;
   const parts = [];
@@ -123,8 +131,8 @@ async function callTool(name, args = {}) {
     case "ask_local":
       return chat(args, args.prompt, 8192);
     case "ask_local_files": {
-      const files = await readFiles(args.paths || []);
-      return chat(args, `${args.prompt}\n\n${files}`, 32768);
+      const prompt = `${args.prompt}\n\n${await readFiles(args.paths || [])}`;
+      return chat(args, prompt, contextFor(prompt, args.max_tokens));
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

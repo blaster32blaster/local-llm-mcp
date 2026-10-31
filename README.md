@@ -70,14 +70,14 @@ Set these as environment variables, for example with `claude mcp add ... -e LOCA
 | `LOCAL_LLM_TIMEOUT_MS` | `600000` | Per-request timeout (10 min) |
 | `LOCAL_LLM_MAX_FILE_BYTES` | `400000` | Total size limit for `ask_local_files` |
 
-Context windows default to 8192 tokens for `ask_local` and 32768 for `ask_local_files`; either can be overridden per call with `num_ctx`.
+Context windows default to 8192 tokens for `ask_local`; `ask_local_files` sizes the window to the files it sends (in 8k steps, at least 8192). Either can be overridden per call with `num_ctx`. Keep windows small on a 12 GB GPU: a 32k window pushed `qwen3:14b` partly onto the CPU and cut it from ~44 to ~15 tok/s (RTX 4070 Ti).
 
 ## Suggested models (12 GB GPU, 32 GB RAM)
 
 | Role | Model | Download | Notes |
 |---|---|---|---|
-| General / default | `qwen3:14b` | ~9 GB | Fits fully on a 12 GB GPU |
-| Coding | `qwen3-coder:30b` | ~19 GB | MoE; splits between GPU and RAM, still fast |
+| General / default | `qwen3:14b` | ~9 GB | Fits fully on a 12 GB GPU at 8k context; ~44 tok/s on an RTX 4070 Ti |
+| Coding | `qwen3-coder:30b` | ~19 GB | MoE; splits about half and half between GPU and RAM, still ~45 tok/s |
 | Fast subagent | `qwen3:4b` | 2.5 GB | ~120-140 tok/s on an RTX 4070 Ti; always reasons before answering (the server strips it) |
 
 ## Test
