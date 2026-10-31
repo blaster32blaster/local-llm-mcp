@@ -70,14 +70,27 @@ const TOOLS = [
   },
 ];
 
+// Errors start with a fixed code (OLLAMA_NOT_RUNNING, MODEL_NOT_FOUND) so Claude can tell
+// the user what to do instead of silently falling back.
 async function ollama(path, body) {
-  const res = await fetch(OLLAMA + path, {
-    method: body ? "POST" : "GET",
-    headers: body ? { "content-type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let res;
+  try {
+    res = await fetch(OLLAMA + path, {
+      method: body ? "POST" : "GET",
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (e) {
+    if (e.name === "TimeoutError") throw new Error(`TIMEOUT: Ollama did not answer within ${TIMEOUT_MS / 1000}s.`);
+    throw new Error(
+      `OLLAMA_NOT_RUNNING: Ollama is not reachable at ${OLLAMA}. Start the Ollama app (Start menu > Ollama) ` +
+        `or run "ollama serve", then try again.`
+    );
+  }
   const text = await res.text();
+  if (res.status === 404 && body?.model)
+    throw new Error(`MODEL_NOT_FOUND: "${body.model}" is not installed. Run "ollama pull ${body.model}" or pick one from list_local_models.`);
   if (!res.ok) throw new Error(`Ollama ${path} returned ${res.status}: ${text.slice(0, 500)}`);
   return JSON.parse(text);
 }

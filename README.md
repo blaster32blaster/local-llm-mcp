@@ -34,6 +34,21 @@ Pass `cpu_only: true` to `ask_local` or `ask_local_files` to run that model enti
 
 Good CPU-side jobs: tagging or sorting lines, pulling fields out of text, quick checks, short summaries. Keep CPU models at 4B-8B, and don't pair a CPU model with one that is already split between GPU and RAM (like `qwen3-coder:30b`): they compete for RAM bandwidth. Use the same `cpu_only` setting every time for a given model, since switching reloads it. The gain needs Claude to issue both calls at once; the server handles requests concurrently.
 
+## Is it running?
+
+There are two parts:
+
+- **Ollama** (the model server) runs in the background, normally from login (llama icon in the system tray). Check: open http://127.0.0.1:11434 (it says "Ollama is running") or run `ollama ps` to see loaded models.
+- **This MCP server** is not a separate service. Claude Code starts it when a session starts and stops it when the session ends. Check: `claude mcp list` shows `local-llm ... Connected`, or ask Claude to run `list_local_models`.
+
+When something is wrong, tool calls fail with a fixed code, so Claude can tell you what to do instead of silently working around it:
+
+| Code | Meaning | Fix |
+|---|---|---|
+| `OLLAMA_NOT_RUNNING` | Ollama is not reachable | Start the Ollama app, or run `ollama serve` |
+| `MODEL_NOT_FOUND` | Model not downloaded | `ollama pull <model>` |
+| `TIMEOUT` | No answer within `LOCAL_LLM_TIMEOUT_MS` | Use a smaller model or prompt, or raise the timeout |
+
 ## Requirements
 
 - Windows, macOS or Linux
